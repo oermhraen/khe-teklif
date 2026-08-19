@@ -194,7 +194,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         ["Firma İsmi", meta["firma"]],
         ["Yetkili İsmi", meta["yetkili"]],
         ["Proje İsmi", meta["proje"]],
-        ["Teklifi Hazirlayan", meta["hazirlayan"]],
+        ["Teklifi Hazırlayan", meta["hazirlayan"]],
         ["E-mail", meta["email"]],
         ["Telefon", meta["telefon"]],
     ]
@@ -217,11 +217,11 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(info_tbl)
     story.append(Spacer(1, 5 * mm))
 
-    header = ["Model", "Açiklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
+    header = ["Model", "Açıklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
     rows = [header]
 
     for _, r in cart_df.iterrows():
-        # Yapistirilan metindeki satir atlamalarini (Enter) PDF formatina (br) cevirme
+        # Yapıştırılan metindeki satır atlamalarını (Enter) PDF formatına (br) çevirme
         desc_html = str(r["AÇIKLAMA"]).replace("\n", "<br/>")
         
         rows.append(
@@ -347,7 +347,7 @@ with st.sidebar:
     st.caption(f"Geçerlilik: {gecerlilik.strftime('%d.%m.%Y')} (5 gün)")
 
     st.divider()
-    if st.button("Sepeti sifirla", use_container_width=True):
+    if st.button("Sepeti sıfırla", use_container_width=True):
         st.session_state.cart = []
         st.rerun()
 
@@ -356,32 +356,38 @@ colA, colB = st.columns([1.1, 1.2], gap="large")
 with colA:
     st.subheader("Ürün Ekle (Manuel)")
 
-    # Varsayilan gorsel metni sablonu
-    ornek_model = "KHE-P01 PLAKALI EŞANJÖR"
-    ornek_aciklama = "Kapasite : 100.000 kCal/h\nPrimer Devre : 90°C / 70°C - 50 kPa\nSekonder Devre : 10°C / 60°C - 50 kPa\nPlaka ve Conta Malzemesi : 316 Paslanmaz / 0,5 mm - EPDM\nGövde Malzemesi ve İşletme Basincci : Karbon Çelik - 10 Bar\nBağlanti Malzemesi ve Çapi : Karbon Çelik - 1\" Dişli"
+    # Varsayılan metin şablonu
+    ornek_model = "KHE-P01-5-C10-CS-00 PLAKALI EŞANJÖR"
+    ornek_aciklama = """Kapasite : 796,62 kW
+Primer Devre : 85,00°C / 65,00°C - 48,37 kPa
+Sekonder Devre : 60,00°C / 80,00°C - 48,69 kPa
+Plaka ve Conta Malzemesi : 0,5 mm - AISI 316L - EPDM
+Gövde Malzemesi : Boyalı Karbon Çelik
+İşletme ve Test Basıncı : 10 / 15 Bar
+Bağlantı Malzemesi ve Çapı : 2" Dıştan Dişli CS"""
 
-    model_input = st.text_input("Ürün Kodu / Başlik", value=ornek_model)
-    aciklama_input = st.text_area("İçerik / Teknik Özellikler", value=ornek_aciklama, height=180)
+    model_input = st.text_input("Ürün Kodu / Başlık", value=ornek_model)
+    aciklama_input = st.text_area("İçerik / Teknik Özellikler", value=ornek_aciklama, height=220)
 
     c1, c2 = st.columns(2)
     with c1:
         qty = st.number_input("Adet", min_value=1, value=1, step=1)
     with c2:
-        list_price = st.number_input("Birim Liste Fiyati (EUR)", min_value=0.0, value=1000.0, step=10.0, format="%.2f")
+        list_price = st.number_input("Birim Liste Fiyatı (EUR)", min_value=0.0, value=1000.0, step=10.0, format="%.2f")
 
     unit = calc_discounted(list_price, float(iskonto))
 
     st.markdown("**Seçilen ürün özeti**")
-    st.write(f"**Liste fiyati:** {eur_fmt_dec(list_price, 2)} EUR")
+    st.write(f"**Liste fiyatı:** {eur_fmt_dec(list_price, 2)} EUR")
     st.write(f"**İskontolu birim fiyat:** {eur_fmt_dec(unit, 2)} EUR + KDV")
 
     if st.button("Sepete ekle", type="primary", use_container_width=True):
         if not model_input.strip() and not aciklama_input.strip():
-            st.error("Lütfen ürün kodu veya açiklama giriniz.")
+            st.error("Lütfen ürün kodu veya açıklama giriniz.")
         else:
             found = False
             for r in st.session_state.cart:
-                # Birebir ayni model adi ve aciklamasi varsa adedi guncelle
+                # Birebir aynı model adı, açıklaması ve liste fiyatı varsa adedi güncelle
                 if r["MODEL"] == model_input and r["AÇIKLAMA"] == aciklama_input and r["LİSTE FİYATI"] == list_price:
                     r["ADET"] = int(r["ADET"]) + int(qty)
                     found = True
@@ -478,4 +484,4 @@ with colB:
             use_container_width=True,
         )
 
-st.caption("Fiyatlar EUR bazinda; KDV hariç gösterilir. İskonto, liste fiyatina yüzde olarak uygulanir.")
+st.caption("Fiyatlar EUR bazında; KDV hariç gösterilir. İskonto, liste fiyatına yüzde olarak uygulanır.")
