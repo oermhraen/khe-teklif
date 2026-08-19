@@ -36,7 +36,7 @@ NOTES = [
     "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
     "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
     "<b>ANLAŞMAZLIK :</b> Satışa konu olan ürünlerin bedelinin vade tarihinden sonraki 8 gün içinde ödenmemesi halinde başka ihtara gerek kalmaksızın temerrüde düşmüş kabul edilir ve alıcı bu tarih itibariyle yasal temerrüt faizi ödemekle yükümlüdür. Her türlü anlaşmazlık durumunda ANKARA mahkemeleri ve icra daireleri yetkilidir.",
-    "<b>DEVREYE ALMA HİZMETI :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
+    "<b>DEVREYE ALMA HİZMETİ :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
 ]
 
 
@@ -64,7 +64,7 @@ def ensure_fonts_registered():
 
     if not os.path.exists(reg_path) or not os.path.exists(bold_path):
         raise FileNotFoundError(
-            "Font dosyalari eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
+            "Font dosyaları eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
         )
 
     try:
@@ -221,7 +221,6 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     rows = [header]
 
     for _, r in cart_df.iterrows():
-        # Yapıştırılan metindeki satır atlamalarını (Enter) PDF formatına (br) çevirme
         desc_html = str(r["AÇIKLAMA"]).replace("\n", "<br/>")
         
         rows.append(
@@ -357,7 +356,7 @@ with colA:
     st.subheader("Ürün Ekle (Manuel)")
 
     # Varsayılan metin şablonu
-    ornek_model = "KHE-P07 - 101 - PLAKALI EŞANJÖR"
+    ornek_model = "KHE-P01-5-C10-CS-00 PLAKALI EŞANJÖR"
     ornek_aciklama = """Kapasite : 796,62 kW
 Primer Devre : 85,00°C / 65,00°C - 48,37 kPa
 Sekonder Devre : 60,00°C / 80,00°C - 48,69 kPa
@@ -387,7 +386,6 @@ Bağlantı Malzemesi ve Çapı : 2" Dıştan Dişli CS"""
         else:
             found = False
             for r in st.session_state.cart:
-                # Birebir aynı model adı, açıklaması ve liste fiyatı varsa adedi güncelle
                 if r["MODEL"] == model_input and r["AÇIKLAMA"] == aciklama_input and r["LİSTE FİYATI"] == list_price:
                     r["ADET"] = int(r["ADET"]) + int(qty)
                     found = True
@@ -403,6 +401,19 @@ Bağlantı Malzemesi ve Çapı : 2" Dıştan Dişli CS"""
                     }
                 )
             st.rerun()
+
+    # --- Fiyat Referans Tablosu ---
+    st.divider()
+    with st.expander("Fiyat Referans Tablosunu Göster", expanded=False):
+        ref_data = {
+            "KOD": ["503", "504", "508", "509", "510", "513", "514", "517", "520", "521", "522", "535", "547", "550", "562", "707", "708"],
+            "MODEL": ["KHE-P01", "KHE-P02", "KHE-P04", "KHE-P05", "KHE-P06", "KHE-P07", "KHE-P08", "KHE-P09", "KHE-P10", "KHE-P11", "KHE-P12", "KHE-P14", "KHE-P15", "KHE-P16", "KHE-P17", "KHE-S03", "KHE-S04"],
+            "GÖVDE 10BAR": ["144 €", "176 €", "459 €", "459 €", "780 €", "615 €", "615 €", "800 €", "1.220 €", "1.491 €", "1.491 €", "2.015 €", "2.301 €", "4.238 €", "3.418 €", "397 €", "269 €"],
+            "GÖVDE 16BAR": ["170 €", "218 €", "690 €", "690 €", "936 €", "856 €", "856 €", "1.263 €", "1.852 €", "1.977 €", "1.977 €", "2.936 €", "3.267 €", "-", "4.051 €", "648 €", "338 €"],
+            "PLAKA": ["4,3 €", "6,4 €", "10,6 €", "10,2 €", "14,1 €", "13,9 €", "14,4 €", "19,9 €", "22,5 €", "25,0 €", "26,5 €", "32,8 €", "35,8 €", "48,9 €", "46,9 €", "10,0 €", "8,7 €"]
+        }
+        df_ref = pd.DataFrame(ref_data)
+        st.dataframe(df_ref, hide_index=True, use_container_width=True)
 
 with colB:
     st.subheader("Teklif Kalemleri")
@@ -454,6 +465,15 @@ with colB:
             st.metric("Kümülatif Toplam", f"{eur_fmt_dec(total, 2)} EUR + KDV")
 
         st.divider()
+
+        st.markdown("**Satır formatı (müşteriye kopyala-yapıştır)**")
+        lines = []
+        for _, r in cart_df.iterrows():
+            unit_txt = eur_fmt_dec(float(r["BİRİM (EUR)"]), 2)
+            lines.append(
+                f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV"
+            )
+        st.code("\n".join(lines), language="text")
 
         meta = {
             "tarih": tarih.strftime("%d.%m.%Y"),
