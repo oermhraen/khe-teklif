@@ -357,7 +357,7 @@ with colA:
     st.subheader("Ürün Ekle (Manuel)")
 
     # Varsayilan gorsel metni sablonu
-    ornek_model = "KHE-P01-5-C10-CS-00 PLAKALI EŞANJÖR"
+    ornek_model = "KHE-P01 PLAKALI EŞANJÖR"
     ornek_aciklama = "Kapasite : 100.000 kCal/h\nPrimer Devre : 90°C / 70°C - 50 kPa\nSekonder Devre : 10°C / 60°C - 50 kPa\nPlaka ve Conta Malzemesi : 316 Paslanmaz / 0,5 mm - EPDM\nGövde Malzemesi ve İşletme Basincci : Karbon Çelik - 10 Bar\nBağlanti Malzemesi ve Çapi : Karbon Çelik - 1\" Dişli"
 
     model_input = st.text_input("Ürün Kodu / Başlik", value=ornek_model)
