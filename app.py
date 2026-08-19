@@ -1,481 +1,329 @@
+import streamlit as st
+import PyPDF2
+import re
 import io
 import os
-import math
-import datetime as dt
+import openpyxl
+from openpyxl.drawing.image import Image
+import subprocess
+import tempfile
 
-import pandas as pd
-import streamlit as st
-
-# PDF
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-# PNG
-import matplotlib.pyplot as plt
-
-
-# =========================================
-# CONFIG
-# =========================================
-PREPARERS = {
-    "Emre Orhan": {"email": "emre.orhan@kodsan.com.tr", "telefon": "0 543 659 36 73"},
-    "Fikret Özdemir": {"email": "fikret.ozdemir@kodsan.com.tr", "telefon": "0 542 349 33 99"},
-    "Mert Özen": {"email": "mert.ozen@kodsan.com.tr", "telefon": "0 542 235 33 77"},
+# Kod haritasi
+KOD_HARITASI = {
+    "503": "KHE-P01", "504": "KHE-P02", "508": "KHE-P04", "509": "KHE-P05",
+    "510": "KHE-P06", "513": "KHE-P07", "514": "KHE-P08", "517": "KHE-P09",
+    "520": "KHE-P10", "521": "KHE-P11", "522": "KHE-P12", "535": "KHE-P14",
+    "547": "KHE-P15", "550": "KHE-P16", "562": "KHE-P17", "707": "KHE-S03",
+    "708": "KHE-S04"
 }
 
-NOTES = [
-    "<b>FİYAT :</b> Fiyatlar EUR bazında olup KDV hariçtir.",
-    "<b>DÖVİZ KURU :</b> Fatura tarihindeki TCMB Euro DSK (Döviz Satış Kuru) esas alınarak fatura TÜRK LİRASI üzerinden kesilecek ve ödeme TÜRK LİRASI üzerinden yapılacaktır; gün içerisinde serbest piyasa kuru T.C.M.B’nin belirlemiş olduğu efektif satış kurunu %1 oranında aşmış ise T.C.M.B kuru yerine serbest piyasa kuru geçerli olacaktır.",
-    "<b>FATURA :</b> Kodsan Bayileri üzerinden faturalandırılacaktır.",
-    "<b>TESLİM ŞEKLİ / GARANTİ :</b> Ankara merkez depomuz teslim. Teklif konusu ürün talimatnamelerine uygun olarak monte edilmiş ve amacı dahilinde kullanılması kaydı ve şartı ile fatura tarihinden itibaren 2 yıl imalat hatalarına karşı garanti kapsamındadır. Kullanıcı ve/veya sistemden kaynaklanan hasarlar garanti kapsamı dışındadır. Müşteri teklife konu olan ürünlerin, yapacağı uygulamada teknik olarak yeterli olduğunu teyit etmektedir.",
-    "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
-    "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
-    "<b>ANLAŞMAZLIK :</b> Satışa konu olan ürünlerin bedelinin vade tarihinden sonraki 8 gün içinde ödenmemesi halinde başka ihtara gerek kalmaksızın temerrüde düşmüş kabul edilir ve alıcı bu tarih itibariyle yasal temerrüt faizi ödemekle yükümlüdür. Her türlü anlaşmazlık durumunda ANKARA mahkemeleri ve icra daireleri yetkilidir.",
-    "<b>DEVREYE ALMA HİZMETI :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
-]
-
-
-# =========================================
-# HELPERS
-# =========================================
-def today_tr() -> dt.date:
-    return dt.date.today()
-
-
-def eur_fmt_dec(x: float, decimals: int = 2) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return ""
-    s = f"{x:,.{decimals}f}"
-    return s.replace(",", "_").replace(".", ",").replace("_", ".")
-
-
-def calc_discounted(list_price: float, discount_pct: float) -> float:
-    return list_price * (1.0 - (discount_pct / 100.0))
-
-
-def ensure_fonts_registered():
-    reg_path = os.path.join("fonts", "DejaVuSans.ttf")
-    bold_path = os.path.join("fonts", "DejaVuSans-Bold.ttf")
-
-    if not os.path.exists(reg_path) or not os.path.exists(bold_path):
-        raise FileNotFoundError(
-            "Font dosyalari eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
-        )
-
-    try:
-        pdfmetrics.getFont("DejaVuSans")
-    except Exception:
-        pdfmetrics.registerFont(TTFont("DejaVuSans", reg_path))
-
-    try:
-        pdfmetrics.getFont("DejaVuSans-Bold")
-    except Exception:
-        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
-
-
-# =========================================
-# PDF Watermark (diagonal, full-page feel)
-# =========================================
-def _watermark(canvas, doc, text: str = "KODSAN"):
-    w, h = A4
-    canvas.saveState()
-
-    font_name = "DejaVuSans-Bold"
-    angle = 45
-
-    alpha_ok = True
-    try:
-        canvas.setFillAlpha(0.04) 
-    except Exception:
-        alpha_ok = False
-
-    if alpha_ok:
-        canvas.setFillColor(colors.HexColor("#BFBFBF"))
-    else:
-        canvas.setFillColor(colors.HexColor("#EFEFEF"))
-
-    diag = (w * w + h * h) ** 0.5
-    target = diag * 0.72
-
-    font_size = 190
-    while font_size > 80:
-        tw = canvas.stringWidth(text, font_name, font_size)
-        if tw <= target:
-            break
-        font_size -= 2
-
-    canvas.setFont(font_name, font_size)
-    canvas.translate(w / 2.0, h / 2.0)
-    canvas.rotate(angle)
-
-    tw = canvas.stringWidth(text, font_name, font_size)
-    canvas.drawString(-tw / 2.0, -font_size * 0.15, text)
-    canvas.restoreState()
-
-
-def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
-    ensure_fonts_registered()
-
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=A4,
-        leftMargin=14 * mm,
-        rightMargin=14 * mm,
-        topMargin=12 * mm,
-        bottomMargin=12 * mm,
-        title="KODSAN TEKLİF",
-    )
-
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        "title_style",
-        parent=styles["Heading2"],
-        fontName="DejaVuSans-Bold",
-        fontSize=14,
-        leading=16,
-        spaceAfter=4,
-    )
-
-    normal = ParagraphStyle(
-        "normal",
-        parent=styles["Normal"],
-        fontName="DejaVuSans",
-        fontSize=9,
-        leading=11,
-    )
-
-    cell_model = ParagraphStyle(
-        "cell_model",
-        parent=styles["Normal"],
-        fontName="DejaVuSans-Bold",
-        fontSize=7.4,
-        leading=9,
-    )
-
-    cell_desc = ParagraphStyle(
-        "cell_desc",
-        parent=styles["Normal"],
-        fontName="DejaVuSans",
-        fontSize=7.2,
-        leading=9,
-    )
-
-    cell_num = ParagraphStyle(
-        "cell_num",
-        parent=styles["Normal"],
-        fontName="DejaVuSans",
-        fontSize=7.4,
-        leading=9,
-        alignment=2, 
-    )
-
-    small = ParagraphStyle(
-        "small",
-        parent=styles["BodyText"],
-        fontName="DejaVuSans",
-        fontSize=8.2,
-        leading=10,
-    )
-
-    story = []
-    story.append(Paragraph("KODSAN TEKLİF", title_style))
-    story.append(Spacer(1, 3 * mm))
-
-    info_data = [
-        ["Tarih", meta["tarih"]],
-        ["Geçerlilik", meta["gecerlilik"]],
-        ["Firma İsmi", meta["firma"]],
-        ["Yetkili İsmi", meta["yetkili"]],
-        ["Proje İsmi", meta["proje"]],
-        ["Teklifi Hazirlayan", meta["hazirlayan"]],
-        ["E-mail", meta["email"]],
-        ["Telefon", meta["telefon"]],
-    ]
-    info_tbl = Table(info_data, colWidths=[34 * mm, 150 * mm])
-    info_tbl.setStyle(
-        TableStyle(
-            [
-                ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-                ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ]
-        )
-    )
-    story.append(info_tbl)
-    story.append(Spacer(1, 5 * mm))
-
-    header = ["Model", "Açiklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
-    rows = [header]
-
-    for _, r in cart_df.iterrows():
-        # Yapistirilan metindeki satir atlamalarini (Enter) PDF formatina (br) cevirme
-        desc_html = str(r["AÇIKLAMA"]).replace("\n", "<br/>")
+def pdf_verilerini_cek(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text()
         
-        rows.append(
-            [
-                Paragraph(str(r["MODEL"]), cell_model),
-                Paragraph(desc_html, cell_desc), 
-                Paragraph(str(int(r["ADET"])), cell_num),
-                Paragraph(eur_fmt_dec(float(r["BİRİM (EUR)"]), 2), cell_num),
-                Paragraph(eur_fmt_dec(float(r["TOPLAM (EUR)"]), 2), cell_num),
-            ]
-        )
-
-    prod_tbl = Table(
-        rows,
-        colWidths=[36 * mm, 88 * mm, 10 * mm, 25 * mm, 25 * mm],
-        repeatRows=1,
-    )
-    prod_tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
-                ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 8.2),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ALIGN", (2, 1), (4, -1), "RIGHT"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ]
-        )
-    )
-
-    story.append(prod_tbl)
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(f"<b>Toplam:</b> {eur_fmt_dec(total, 2)} EUR + KDV", normal))
-    story.append(Spacer(1, 3 * mm))
-
-    story.append(Paragraph("<b>NOTLAR</b>", normal))
-    story.append(Spacer(1, 1.5 * mm))
-    for n in NOTES:
-        story.append(Paragraph(n, small))
-        story.append(Spacer(1, 1.2 * mm))
-
-    doc.build(
-        story,
-        onFirstPage=lambda c, d: _watermark(c, d, "KODSAN"),
-        onLaterPages=lambda c, d: _watermark(c, d, "KODSAN"),
-    )
-
-    pdf = buf.getvalue()
-    buf.close()
-    return pdf
-
-
-# =========================================
-# PNG output
-# =========================================
-def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> bytes:
-    view = cart_df.copy()
-    view["BİRİM (EUR)"] = view["BİRİM (EUR)"].map(lambda v: eur_fmt_dec(float(v), 2))
-    view["TOPLAM (EUR)"] = view["TOPLAM (EUR)"].map(lambda v: eur_fmt_dec(float(v), 2))
-    view["ADET"] = view["ADET"].astype(int).astype(str)
-
-    title = f"{meta['firma']} | {meta['proje']} | Toplam: {eur_fmt_dec(total, 2)} EUR + KDV"
-
-    fig_h = 1.2 + 0.35 * max(1, len(view))
-    fig, ax = plt.subplots(figsize=(12, fig_h))
-    ax.axis("off")
-    ax.set_title(title, fontsize=11, pad=10)
-
-    tbl = ax.table(
-        cellText=view[["MODEL", "AÇIKLAMA", "ADET", "BİRİM (EUR)", "TOPLAM (EUR)"]].values,
-        colLabels=["MODEL", "AÇIKLAMA", "ADET", "BİRİM (EUR)", "TOPLAM (EUR)"],
-        cellLoc="left",
-        colLoc="left",
-        loc="center",
-    )
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(8.5)
-    tbl.scale(1, 1.2)
-
-    buf = io.BytesIO()
-    plt.tight_layout()
-    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return buf.getvalue()
-
-
-# =========================================
-# Streamlit UI
-# =========================================
-st.set_page_config(
-    page_title="Teklif Oluşturucu (Manuel Giriş)",
-    page_icon="📄",
-    layout="wide"
-)
-
-if "cart" not in st.session_state:
-    st.session_state.cart = []
-
-with st.sidebar:
-    st.header("Teklif Bilgileri")
-
-    tarih = today_tr()
-    gecerlilik = tarih + dt.timedelta(days=5)
-
-    firma = st.text_input("FİRMA İSMİ", value="")
-    yetkili = st.text_input("YETKİLİ İSMİ", value="")
-    proje = st.text_input("PROJE İSMİ", value="")
-    iskonto = st.number_input("İSKONTO ORANI (%)", min_value=0.0, max_value=100.0, value=30.0, step=0.5)
-
-    hazirlayan = st.selectbox("TEKLİFİ HAZIRLAYAN", list(PREPARERS.keys()), index=0)
-    email = PREPARERS[hazirlayan]["email"]
-    telefon = PREPARERS[hazirlayan]["telefon"]
-
-    st.text_input("EMAİL", value=email, disabled=True)
-    st.text_input("TELEFON", value=telefon, disabled=True)
-
-    st.divider()
-    st.caption(f"Tarih: {tarih.strftime('%d.%m.%Y')}")
-    st.caption(f"Geçerlilik: {gecerlilik.strftime('%d.%m.%Y')} (5 gün)")
-
-    st.divider()
-    if st.button("Sepeti sifirla", use_container_width=True):
-        st.session_state.cart = []
-        st.rerun()
-
-colA, colB = st.columns([1.1, 1.2], gap="large")
-
-with colA:
-    st.subheader("Ürün Ekle (Manuel)")
-
-    # Varsayilan gorsel metni sablonu
-    ornek_model = "KHE-P01 PLAKALI EŞANJÖR"
-    ornek_aciklama = "Kapasite : 100.000 kCal/h\nPrimer Devre : 90°C / 70°C - 50 kPa\nSekonder Devre : 10°C / 60°C - 50 kPa\nPlaka ve Conta Malzemesi : 316 Paslanmaz / 0,5 mm - EPDM\nGövde Malzemesi ve İşletme Basıncı : Karbon Çelik - 10 Bar\nBağlantı Malzemesi ve Çapı : Karbon Çelik - 1\" Dişli"
-
-    model_input = st.text_input("Ürün Kodu / Başlik", value=ornek_model)
-    aciklama_input = st.text_area("İçerik / Teknik Özellikler", value=ornek_aciklama, height=180)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        qty = st.number_input("Adet", min_value=1, value=1, step=1)
-    with c2:
-        list_price = st.number_input("Birim Liste Fiyati (EUR)", min_value=0.0, value=1000.0, step=10.0, format="%.2f")
-
-    unit = calc_discounted(list_price, float(iskonto))
-
-    st.markdown("**Seçilen ürün özeti**")
-    st.write(f"**Liste fiyati:** {eur_fmt_dec(list_price, 2)} EUR")
-    st.write(f"**İskontolu birim fiyat:** {eur_fmt_dec(unit, 2)} EUR + KDV")
-
-    if st.button("Sepete ekle", type="primary", use_container_width=True):
-        if not model_input.strip() and not aciklama_input.strip():
-            st.error("Lütfen ürün kodu veya açiklama giriniz.")
-        else:
-            found = False
-            for r in st.session_state.cart:
-                # Birebir ayni model adi ve aciklamasi varsa adedi guncelle
-                if r["MODEL"] == model_input and r["AÇIKLAMA"] == aciklama_input and r["LİSTE FİYATI"] == list_price:
-                    r["ADET"] = int(r["ADET"]) + int(qty)
-                    found = True
-                    break
-            
-            if not found:
-                st.session_state.cart.append(
-                    {
-                        "MODEL": model_input,
-                        "AÇIKLAMA": aciklama_input,
-                        "LİSTE FİYATI": list_price,
-                        "ADET": int(qty),
-                    }
-                )
-            st.rerun()
-
-with colB:
-    st.subheader("Teklif Kalemleri")
-
-    if len(st.session_state.cart) == 0:
-        st.info("Sepet boş. Soldan manuel ürün ekleyebilirsiniz.")
+    veriler = {}
+    
+    tarih_match = re.search(r"Tarih\s+([\d.]+)", text)
+    veriler["Tarih"] = tarih_match.group(1) if tarih_match else ""
+    
+    model_match = re.search(r"Model\s+(?:MIT\s+)?(\d+)", text)
+    if model_match:
+        mit_kodu = model_match.group(1)
+        veriler["Model_Kodlu"] = KOD_HARITASI.get(mit_kodu, f"Bulunamadi ({mit_kodu})")
     else:
-        cart_df = pd.DataFrame(st.session_state.cart)
-        cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(lambda p: calc_discounted(float(p), float(iskonto)))
-        cart_df["TOPLAM (EUR)"] = cart_df["BİRİM (EUR)"] * cart_df["ADET"].astype(int)
-        total = float(cart_df["TOPLAM (EUR)"].sum())
+        veriler["Model_Kodlu"] = ""
 
-        edit_df = cart_df[["MODEL", "AÇIKLAMA", "ADET", "BİRİM (EUR)", "TOPLAM (EUR)"]].copy()
-        edit_df["SİL"] = False
+    # KAPASITE VE BIRIMI AYIRMA
+    kapasite_match = re.search(r"Kapasite\s+([\d,.]+)\s*(kW|kcal/h)", text, re.IGNORECASE)
+    if kapasite_match:
+        veriler["Kapasite"] = kapasite_match.group(1)
+        birim = kapasite_match.group(2).lower()
+        veriler["Kapasite_Birim"] = "kW" if birim == "kw" else "kcal/h"
+    else:
+        kapasite_fallback = re.search(r"Kapasite\s+([\d,.]+)", text)
+        veriler["Kapasite"] = kapasite_fallback.group(1) if kapasite_fallback else ""
+        veriler["Kapasite_Birim"] = ""
+    
+    plaka_match = re.search(r"Toplam Plaka Sayısı\s+(\d+)", text)
+    veriler["Plaka_Sayisi"] = plaka_match.group(1) if plaka_match else ""
+    
+    dizilim_match = re.search(r"Plaka Dizilimi\s+(.*?)\s*Isı Tran", text)
+    veriler["Plaka_Dizilimi"] = dizilim_match.group(1).strip() if dizilim_match else ""
+    
+    alan_match = re.search(r"Isı Tran[s]?fer Alanı\s+([\d,]+)", text)
+    veriler["Isi_Transfer_Alani"] = alan_match.group(1) if alan_match else ""
+    
+    marjin_match = re.search(r"Eşanjör marjini\s+([-\d,]+)", text)
+    veriler["Esanjor_Marjini"] = marjin_match.group(1) if marjin_match else ""
+    
+    k_degeri_match = re.search(r"Görev k değeri\s+([\d\s/]+)\s*W", text)
+    veriler["K_Degeri"] = k_degeri_match.group(1).strip() if k_degeri_match else ""
+    
+    lmtd_match = re.search(r"LMTD\s+([\d,]+)", text)
+    veriler["LMTD"] = lmtd_match.group(1) if lmtd_match else ""
 
-        edited = st.data_editor(
-            edit_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "ADET": st.column_config.NumberColumn("ADET", min_value=1, step=1),
-                "BİRİM (EUR)": st.column_config.NumberColumn("BİRİM (EUR)", format="%.2f"),
-                "TOPLAM (EUR)": st.column_config.NumberColumn("TOPLAM (EUR)", format="%.2f"),
-                "SİL": st.column_config.CheckboxColumn("SİL"),
-            },
-            disabled=["MODEL", "AÇIKLAMA", "BİRİM (EUR)", "TOPLAM (EUR)"],
-            key="cart_editor",
-        )
+    def ikili_cek(kalip):
+        match = re.search(kalip, text)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+        return "", ""
 
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Değişiklikleri uygula", use_container_width=True):
-                keep = []
-                for idx, r in edited.iterrows():
-                    if bool(r.get("SİL", False)):
-                        continue
-                    keep.append(
-                        {
-                            "MODEL": r["MODEL"],
-                            "AÇIKLAMA": r["AÇIKLAMA"],
-                            "LİSTE FİYATI": float(cart_df.loc[idx, "LİSTE FİYATI"]),
-                            "ADET": int(r["ADET"]),
-                        }
-                    )
-                st.session_state.cart = keep
-                st.rerun()
+    veriler["Primer_Akiskan"], veriler["Sekonder_Akiskan"] = ikili_cek(r"Akışkan Cinsi\s+(\S+)\s+(\S+)")
+    veriler["Primer_Gecis"], veriler["Sekonder_Gecis"] = ikili_cek(r"Geçiş Sayısı\s+(\d+)\s+(\d+)")
+    veriler["Primer_Debi"], veriler["Sekonder_Debi"] = ikili_cek(r"Akışkan Debisi\s+([\d,]+)\s*m³/h\s+([\d,]+)")
+    veriler["Primer_Giris_Sicakligi"], veriler["Sekonder_Giris_Sicakligi"] = ikili_cek(r"Giriş Sıcaklığı\s+([\d,]+)\s*°C\s+([\d,]+)")
+    veriler["Primer_Cikis_Sicakligi"], veriler["Sekonder_Cikis_Sicakligi"] = ikili_cek(r"Çıkış Sıcaklığı\s+([\d,]+)\s*°C\s+([\d,]+)")
+    veriler["Primer_Basinc_Kaybi"], veriler["Sekonder_Basinc_Kaybi"] = ikili_cek(r"Basınç Kaybı\s+([\d,]+)\s*kPa\s+([\d,]+)")
+    veriler["Primer_Plaka_Basinc"], veriler["Sekonder_Plaka_Basinc"] = ikili_cek(r"Plakalardaki basınç kaybı\s+([\d,]+)\s*kPa\s+([\d,]+)")
+    veriler["Primer_Baglanti_Basinc"], veriler["Sekonder_Baglanti_Basinc"] = ikili_cek(r"Bağlantılardaki basınç kaybı\s+([\d,]+)\s*kPa\s+([\d,]+)")
+    veriler["Primer_Hiz"], veriler["Sekonder_Hiz"] = ikili_cek(r"Kanal Akışkan Hızı\s+([\d,]+)\s*m/s\s+([\d,]+)")
+    veriler["Primer_Baglanti_Hizi"], veriler["Sekonder_Baglanti_Hizi"] = ikili_cek(r"Bağlantı Akışkan Hızı\s+([\d,]+)\s*m/s\s+([\d,]+)")
+    veriler["Primer_Kirlenme"], veriler["Sekonder_Kirlenme"] = ikili_cek(r"Kirlenme faktörü\s+([\d,]+)\s*\(m² K\)/W\s+([\d,]+)")
+    
+    veriler["Primer_Yogunluk"], veriler["Sekonder_Yogunluk"] = ikili_cek(r"Yoğunluk\s+([\d,]+)\s*kg/m³\s+([\d,]+)")
+    veriler["Primer_Ozgul_Isi"], veriler["Sekonder_Ozgul_Isi"] = ikili_cek(r"Özgül Isı\s+(\d+)\s*J/\(kg K\)\s+(\d+)")
+    veriler["Primer_Iletkenlik"], veriler["Sekonder_Iletkenlik"] = ikili_cek(r"Termal İletkenlik\s+([\d,]+)\s*W/\(m K\)\s+([\d,]+)")
+    veriler["Primer_Viskozite"], veriler["Sekonder_Viskozite"] = ikili_cek(r"Viskozite\s+([\d,]+)\s*cP\s+([\d,]+)")
 
-        with c2:
-            st.metric("Kümülatif Toplam", f"{eur_fmt_dec(total, 2)} EUR + KDV")
+    plaka_malzeme_match = re.search(r"Plaka Malzemesi\s+(.+)", text)
+    veriler["Plaka_Malzemesi"] = plaka_malzeme_match.group(1).strip() if plaka_malzeme_match else ""
+    
+    conta_malzeme_match = re.search(r"Conta Malzemesi\s+(.+)", text)
+    veriler["Conta_Malzemesi"] = conta_malzeme_match.group(1).strip() if conta_malzeme_match else ""
+    
+    govde_malzeme_match = re.search(r"Gövde Malzemesi\s+(.+)", text)
+    veriler["Govde_Malzemesi"] = govde_malzeme_match.group(1).strip() if govde_malzeme_match else ""
+    
+    baglanti_p1_match = re.search(r"Primer Devre\s+(M\d+\s*=>\s*M\d+)", text)
+    veriler["Baglanti_Primer_1"] = baglanti_p1_match.group(1) if baglanti_p1_match else ""
+    
+    baglanti_p_tip_match = re.search(r"M1\s*=>\s*M2.*?\n\s*(.*?)\s+\d", text)
+    veriler["Baglanti_Primer_Tip"] = baglanti_p_tip_match.group(1).strip() if baglanti_p_tip_match else ""
+    
+    baglanti_s1_match = re.search(r"Sekonder Devre\s+(M\d+\s*=>\s*M\d+)", text)
+    veriler["Baglanti_Sekonder_1"] = baglanti_s1_match.group(1) if baglanti_s1_match else ""
 
-        st.divider()
+    baglanti_s_tip_match = re.search(r"M3\s*=>\s*M4.*?\n\s*(.*?)(?:\n|Ağırlık|$)", text)
+    veriler["Baglanti_Sekonder_Tip"] = baglanti_s_tip_match.group(1).strip() if baglanti_s_tip_match else ""
 
-        meta = {
-            "tarih": tarih.strftime("%d.%m.%Y"),
-            "gecerlilik": gecerlilik.strftime("%d.%m.%Y"),
-            "firma": firma.strip() or "-",
-            "yetkili": yetkili.strip() or "-",
-            "proje": proje.strip() or "-",
-            "hazirlayan": hazirlayan,
-            "email": email,
-            "telefon": telefon,
-        }
+    agirlik_match = re.search(r"Ağırlık Boş / Dolu\s+([\d,\s/]+)\s*kg", text)
+    veriler["Agirlik"] = agirlik_match.group(1).strip() if agirlik_match else ""
+    
+    hacim_match = re.search(r"İç Hacim Primer / Sekonder\s+([\d,\s/]+)\s*dm³", text)
+    veriler["Hacim"] = hacim_match.group(1).strip() if hacim_match else ""
+    
+    dizayn_basinc_match = re.search(r"Dizayn / Test Basıncı\s+([\d,\s/]+)\s*bar", text)
+    veriler["Dizayn_Basinci"] = dizayn_basinc_match.group(1).strip() if dizayn_basinc_match else ""
+    
+    calisma_sicakligi_match = re.search(r"Min/Max Çalışma Sıcaklığı\s+([-\d,\s/]+)\s*°C", text)
+    veriler["Calisma_Sicakligi"] = calisma_sicakligi_match.group(1).strip() if calisma_sicakligi_match else ""
+    
+    fark_basinc_match = re.search(r"Maksimum Diferansiyel Basınç Farkı\s+(\d+)\s*bar", text)
+    veriler["Max_Fark_Basinc"] = fark_basinc_match.group(1).strip() if fark_basinc_match else ""
 
-        pdf_bytes = build_pdf_bytes(meta, cart_df, total)
-        st.download_button(
-            label="PDF indir (KODSAN TEKLİF)",
-            data=pdf_bytes,
-            file_name=f"Kodsan_Teklif_{meta['firma'].replace(' ', '_')}_{meta['tarih'].replace('.', '-')}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
+    return veriler
 
-        png_bytes = build_table_png_bytes(cart_df, meta, total)
-        st.download_button(
-            label="PNG indir (ekran görüntüsü gibi)",
-            data=png_bytes,
-            file_name=f"Teklif_{meta['firma'].replace(' ', '_')}_{meta['tarih'].replace('.', '-')}.png",
-            mime="image/png",
-            use_container_width=True,
-        )
+def excele_yaz(excel_file_path, v):
+    wb = openpyxl.load_workbook(excel_file_path)
+    sheet = wb.active 
+    
+    logo_path = "logo.png"
+    if os.path.exists(logo_path):
+        img = Image(logo_path)
+        sheet.add_image(img, "B1") 
+    
+    sheet["E3"] = v.get("Tarih", "")
+    sheet["A3"] = v.get("Model_Kodlu", "")
+    
+    sheet["B6"] = v.get("Kapasite", "")
+    sheet["D6"] = v.get("Kapasite_Birim", "")
+    
+    sheet["B7"] = v.get("Model_Kodlu", "") 
+    sheet["B8"] = v.get("Plaka_Sayisi", "")
+    sheet["B9"] = v.get("Plaka_Dizilimi", "") 
+    sheet["B10"] = v.get("Isi_Transfer_Alani", "")
+    sheet["B11"] = v.get("Esanjor_Marjini", "")
+    sheet["B12"] = v.get("K_Degeri", "")
+    sheet["B13"] = v.get("LMTD", "")
+    
+    sheet["B15"] = v.get("Primer_Akiskan", "")
+    sheet["B16"] = v.get("Primer_Gecis", "")
+    sheet["B17"] = v.get("Primer_Debi", "")
+    sheet["B18"] = v.get("Primer_Giris_Sicakligi", "")
+    sheet["B19"] = v.get("Primer_Cikis_Sicakligi", "")
+    sheet["B20"] = v.get("Primer_Basinc_Kaybi", "")
+    sheet["B21"] = v.get("Primer_Plaka_Basinc", "")
+    sheet["B22"] = v.get("Primer_Baglanti_Basinc", "")
+    sheet["B23"] = v.get("Primer_Hiz", "")
+    sheet["B24"] = v.get("Primer_Baglanti_Hizi", "") 
+    sheet["B25"] = v.get("Primer_Kirlenme", "")
+    
+    sheet["D15"] = v.get("Sekonder_Akiskan", "")
+    sheet["D16"] = v.get("Sekonder_Gecis", "")
+    sheet["D17"] = v.get("Sekonder_Debi", "")
+    sheet["D18"] = v.get("Sekonder_Giris_Sicakligi", "")
+    sheet["D19"] = v.get("Sekonder_Cikis_Sicakligi", "")
+    sheet["D20"] = v.get("Sekonder_Basinc_Kaybi", "")
+    sheet["D21"] = v.get("Sekonder_Plaka_Basinc", "")
+    sheet["D22"] = v.get("Sekonder_Baglanti_Basinc", "")
+    sheet["D23"] = v.get("Sekonder_Hiz", "")
+    sheet["D24"] = v.get("Sekonder_Baglanti_Hizi", "") 
+    sheet["D25"] = v.get("Sekonder_Kirlenme", "")
+    
+    sheet["B27"] = v.get("Primer_Yogunluk", "")
+    sheet["B28"] = v.get("Primer_Ozgul_Isi", "")
+    sheet["B29"] = v.get("Primer_Iletkenlik", "")
+    sheet["B30"] = v.get("Primer_Viskozite", "")
+    
+    sheet["D27"] = v.get("Sekonder_Yogunluk", "")
+    sheet["D28"] = v.get("Sekonder_Ozgul_Isi", "")
+    sheet["D29"] = v.get("Sekonder_Iletkenlik", "")
+    sheet["D30"] = v.get("Sekonder_Viskozite", "")
+    
+    sheet["B32"] = v.get("Plaka_Malzemesi", "")
+    sheet["B33"] = v.get("Conta_Malzemesi", "")
+    sheet["B34"] = v.get("Govde_Malzemesi", "")
+    
+    sheet["B36"] = v.get("Baglanti_Primer_1", "")
+    sheet["B37"] = v.get("Baglanti_Primer_Tip", "")
+    sheet["B38"] = v.get("Baglanti_Sekonder_1", "")
+    sheet["B39"] = v.get("Baglanti_Sekonder_Tip", "") 
+    
+    sheet["B40"] = v.get("Agirlik", "")
+    sheet["B41"] = v.get("Hacim", "")
+    sheet["B42"] = v.get("Dizayn_Basinci", "")
+    sheet["B43"] = v.get("Calisma_Sicakligi", "")
+    sheet["B44"] = v.get("Max_Fark_Basinc", "")
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
-st.caption("Fiyatlar EUR bazinda; KDV hariç gösterilir. İskonto, liste fiyatina yüzde olarak uygulanir.")
+def excelden_pdfe_cevir(excel_bytes):
+    """Excel dosyasini arka planda LibreOffice kullanarak PDF'e cevirir (Ctrl+P mantigi)"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
+        tmp_excel.write(excel_bytes.getvalue())
+        tmp_excel_path = tmp_excel.name
+
+    out_dir = os.path.dirname(tmp_excel_path)
+    
+    try:
+        # LibreOffice ile Excel dosyasini PDF'e donustur
+        subprocess.run([
+            "libreoffice", "--headless", "--convert-to", "pdf", 
+            tmp_excel_path, "--outdir", out_dir
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception as e:
+        st.error("Arka planda LibreOffice calisirken bir hata olustu. (packages.txt dosyasini kontrol et)")
+        return None
+
+    pdf_path = tmp_excel_path.replace(".xlsx", ".pdf")
+    if os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            pdf_data = f.read()
+        
+        # Sunucuyu mesgul etmemek icin gecici dosyalari sil
+        os.remove(tmp_excel_path)
+        os.remove(pdf_path)
+        return pdf_data
+    else:
+        return None
+
+# --- STREAMLIT ARAYUZU ---
+st.set_page_config(page_title="PDF'ten Excel'e Veri Aktarimi", layout="centered")
+st.title("Teknik Belge Excel Olusturucu")
+
+if "islem_tamam" not in st.session_state:
+    st.session_state.islem_tamam = False
+
+uploaded_pdf = st.file_uploader("Teknik Belgeyi (PDF) Yukle", type="pdf")
+sablon_excel_yolu = "teknik.xlsx" 
+
+if uploaded_pdf:
+    if st.button("Uygula ve Hazirla"):
+        with st.spinner("Veriler isleniyor ve dosya PDF'e ceviriliyor (Bu islem birkac saniye surebilir)..."):
+            st.session_state.cekilen_veriler = pdf_verilerini_cek(uploaded_pdf)
+            
+            # Dinamik Dosya Adi Olusturma
+            def t_temizle(val):
+                return val.replace(",00", "") if val else "0"
+            
+            a3 = st.session_state.cekilen_veriler.get("Model_Kodlu", "MODEL")
+            b8 = st.session_state.cekilen_veriler.get("Plaka_Sayisi", "0")
+            b18 = t_temizle(st.session_state.cekilen_veriler.get("Primer_Giris_Sicakligi", ""))
+            b19 = t_temizle(st.session_state.cekilen_veriler.get("Primer_Cikis_Sicakligi", ""))
+            d18 = t_temizle(st.session_state.cekilen_veriler.get("Sekonder_Giris_Sicakligi", ""))
+            d19 = t_temizle(st.session_state.cekilen_veriler.get("Sekonder_Cikis_Sicakligi", ""))
+            
+            st.session_state.dosya_adi = f"KODSAN_{a3}_{b8}_{b18}-{b19}_{d18}-{d19}"
+            
+            try:
+                # 1. Excel'i hazirla
+                st.session_state.hazir_excel = excele_yaz(sablon_excel_yolu, st.session_state.cekilen_veriler)
+                
+                # 2. Hazirlanan Excel'i PDF'e (Ctrl+P gibi) cevir
+                st.session_state.hazir_pdf = excelden_pdfe_cevir(st.session_state.hazir_excel)
+                
+                if st.session_state.hazir_pdf:
+                    st.session_state.islem_tamam = True
+                else:
+                    st.session_state.islem_tamam = False
+            except FileNotFoundError:
+                st.error(f"Hata: '{sablon_excel_yolu}' dosyasi bulunamadi. Lutfen dosyanin GitHub reposunda app.py ile ayni dizinde oldugundan emin ol.")
+                st.session_state.islem_tamam = False
+
+    if st.session_state.islem_tamam:
+        st.success("Aktarim Basarili! Asagidan istedigin formatta indirebilirsin.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="Excel Olarak Indir",
+                data=st.session_state.hazir_excel,
+                file_name=f"{st.session_state.dosya_adi}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        with col2:
+            st.download_button(
+                label="PDF Olarak Indir",
+                data=st.session_state.hazir_pdf,
+                file_name=f"{st.session_state.dosya_adi}.pdf",
+                mime="application/pdf"
+            )
+
+        # --- TEKLIF ICERIGI BOLUMU ---
+        st.markdown("---")
+        st.subheader("Teklif İçeriği")
+        
+        # Verileri degiskenlere atayalim
+        v_data = st.session_state.cekilen_veriler
+        
+        model_metni = v_data.get('Model_Kodlu', '')
+        kapasite_metni = f"{v_data.get('Kapasite', '')} {v_data.get('Kapasite_Birim', '')}"
+        
+        primer_metni = f"{v_data.get('Primer_Giris_Sicakligi', '')}°C / {v_data.get('Primer_Cikis_Sicakligi', '')}°C - {v_data.get('Primer_Basinc_Kaybi', '')} kPa"
+        sekonder_metni = f"{v_data.get('Sekonder_Giris_Sicakligi', '')}°C / {v_data.get('Sekonder_Cikis_Sicakligi', '')}°C - {v_data.get('Sekonder_Basinc_Kaybi', '')} kPa"
+        
+        malzeme_metni = f"{v_data.get('Plaka_Malzemesi', '')} - {v_data.get('Conta_Malzemesi', '')}"
+        
+        govde_metni = v_data.get('Govde_Malzemesi', '')
+        
+        basinc_tam = v_data.get("Dizayn_Basinci", "")
+        isletme_test_basinci = f"{basinc_tam} Bar" if basinc_tam else ""
+        
+        baglanti_metni = v_data.get("Baglanti_Primer_Tip", "")
+
+        # Ekrana basilacak final metin
+        teklif_ciktisi = f"""Model : {model_metni}
+Kapasite : {kapasite_metni}
+Primer Devre : {primer_metni}
+Sekonder Devre : {sekonder_metni}
+Plaka ve Conta Malzemesi : {malzeme_metni}
+Gövde Malzemesi : {govde_metni}
+İşletme ve Test Basıncı : {isletme_test_basinci}
+Bağlantı Malzemesi ve Çapı : {baglanti_metni}"""
+
+        st.text_area("Mail veya teklif formuna kopyalamak için:", value=teklif_ciktisi, height=230)
