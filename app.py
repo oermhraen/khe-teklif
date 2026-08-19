@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 
 # =========================================
-# CONFIG
+# CONFIG & DATA
 # =========================================
 PREPARERS = {
     "Emre Orhan": {"email": "emre.orhan@kodsan.com.tr", "telefon": "0 543 659 36 73"},
@@ -39,6 +39,26 @@ NOTES = [
     "<b>DEVREYE ALMA HİZMETİ :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
 ]
 
+# Hesaplayıcı için matematiksel veri seti
+KHE_PRICES = {
+    "KHE-P01": {"10BAR": 144, "16BAR": 170, "PLAKA": 4.3},
+    "KHE-P02": {"10BAR": 176, "16BAR": 218, "PLAKA": 6.4},
+    "KHE-P04": {"10BAR": 459, "16BAR": 690, "PLAKA": 10.6},
+    "KHE-P05": {"10BAR": 459, "16BAR": 690, "PLAKA": 10.2},
+    "KHE-P06": {"10BAR": 780, "16BAR": 936, "PLAKA": 14.1},
+    "KHE-P07": {"10BAR": 615, "16BAR": 856, "PLAKA": 13.9},
+    "KHE-P08": {"10BAR": 615, "16BAR": 856, "PLAKA": 14.4},
+    "KHE-P09": {"10BAR": 800, "16BAR": 1263, "PLAKA": 19.9},
+    "KHE-P10": {"10BAR": 1220, "16BAR": 1852, "PLAKA": 22.5},
+    "KHE-P11": {"10BAR": 1491, "16BAR": 1977, "PLAKA": 25.0},
+    "KHE-P12": {"10BAR": 1491, "16BAR": 1977, "PLAKA": 26.5},
+    "KHE-P14": {"10BAR": 2015, "16BAR": 2936, "PLAKA": 32.8},
+    "KHE-P15": {"10BAR": 2301, "16BAR": 3267, "PLAKA": 35.8},
+    "KHE-P16": {"10BAR": 4238, "16BAR": 0, "PLAKA": 48.9},
+    "KHE-P17": {"10BAR": 3418, "16BAR": 4051, "PLAKA": 46.9},
+    "KHE-S03": {"10BAR": 397, "16BAR": 648, "PLAKA": 10.0},
+    "KHE-S04": {"10BAR": 269, "16BAR": 338, "PLAKA": 8.7},
+}
 
 # =========================================
 # HELPERS
@@ -46,17 +66,14 @@ NOTES = [
 def today_tr() -> dt.date:
     return dt.date.today()
 
-
 def eur_fmt_dec(x: float, decimals: int = 2) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return ""
     s = f"{x:,.{decimals}f}"
     return s.replace(",", "_").replace(".", ",").replace("_", ".")
 
-
 def calc_discounted(list_price: float, discount_pct: float) -> float:
     return list_price * (1.0 - (discount_pct / 100.0))
-
 
 def ensure_fonts_registered():
     reg_path = os.path.join("fonts", "DejaVuSans.ttf")
@@ -402,9 +419,31 @@ Bağlantı Malzemesi ve Çapı : 2" Dıştan Dişli CS"""
                 )
             st.rerun()
 
-    # --- Fiyat Referans Tablosu ---
+    # --- Hızlı Hesaplayıcı ve Fiyat Referans Tablosu ---
     st.divider()
-    with st.expander("Fiyat Referans Tablosunu Göster", expanded=False):
+    with st.expander("Hesaplayıcı ve Fiyat Referans Tablosu", expanded=False):
+        st.markdown("#### Hızlı Fiyat Hesaplayıcı")
+        
+        calc_col1, calc_col2, calc_col3 = st.columns(3)
+        with calc_col1:
+            calc_model = st.selectbox("Model Seçiniz", list(KHE_PRICES.keys()))
+        with calc_col2:
+            calc_pressure = st.radio("Gövde Basıncı", ["10BAR", "16BAR"], horizontal=True)
+        with calc_col3:
+            calc_plates = st.number_input("Plaka Sayısı", min_value=1, value=50, step=1)
+            
+        base_p = KHE_PRICES[calc_model][calc_pressure]
+        pl_p = KHE_PRICES[calc_model]["PLAKA"]
+        
+        if base_p == 0:
+            st.error("Seçilen model için bu basınç sınıfı (16 Bar) bulunmamaktadır.")
+        else:
+            calc_total = base_p + (pl_p * calc_plates)
+            st.info(f"**Hesaplanan Fiyat:** {base_p} € + ({pl_p} € x {calc_plates}) = **{calc_total:,.2f} EUR**")
+            
+        st.divider()
+        st.markdown("#### Fiyat Referans Tablosu")
+        # DataFrame yerine Table fonksiyonu kullanılarak kaydırma (scroll) özelliği iptal edildi.
         ref_data = {
             "KOD": ["503", "504", "508", "509", "510", "513", "514", "517", "520", "521", "522", "535", "547", "550", "562", "707", "708"],
             "MODEL": ["KHE-P01", "KHE-P02", "KHE-P04", "KHE-P05", "KHE-P06", "KHE-P07", "KHE-P08", "KHE-P09", "KHE-P10", "KHE-P11", "KHE-P12", "KHE-P14", "KHE-P15", "KHE-P16", "KHE-P17", "KHE-S03", "KHE-S04"],
@@ -413,7 +452,7 @@ Bağlantı Malzemesi ve Çapı : 2" Dıştan Dişli CS"""
             "PLAKA": ["4,3 €", "6,4 €", "10,6 €", "10,2 €", "14,1 €", "13,9 €", "14,4 €", "19,9 €", "22,5 €", "25,0 €", "26,5 €", "32,8 €", "35,8 €", "48,9 €", "46,9 €", "10,0 €", "8,7 €"]
         }
         df_ref = pd.DataFrame(ref_data)
-        st.dataframe(df_ref, hide_index=True, use_container_width=True)
+        st.table(df_ref)
 
 with colB:
     st.subheader("Teklif Kalemleri")
