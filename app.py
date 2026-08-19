@@ -357,7 +357,7 @@ with colA:
     st.subheader("Ürün Ekle (Manuel)")
 
     # Varsayılan metin şablonu
-    ornek_model = "KHE-P01-5-C10-CS-00 PLAKALI EŞANJÖR"
+    ornek_model = "KHE-P07"
     ornek_aciklama = """Kapasite : 796,62 kW
 Primer Devre : 85,00°C / 65,00°C - 48,37 kPa
 Sekonder Devre : 60,00°C / 80,00°C - 48,69 kPa
