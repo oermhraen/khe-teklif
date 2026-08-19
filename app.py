@@ -54,67 +54,17 @@ def eur_fmt_dec(x: float, decimals: int = 2) -> str:
     return s.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-
-    col_map = {}
-    for c in df.columns:
-        uc = c.upper()
-        if uc in ["MODEL", "KOD", "ÜRÜN KODU", "URUN KODU", "STOK KODU"]:
-            col_map[c] = "MODEL"
-        elif uc in ["AÇIKLAMA", "ACIKLAMA", "ÜRÜN AÇIKLAMASI", "URUN ACIKLAMASI", "DESCRIPTION"]:
-            col_map[c] = "AÇIKLAMA"
-        elif uc in ["LİSTE FİYATI", "LISTE FIYATI", "FİYAT", "FIYAT", "PRICE", "LİSTE FİYAT", "LISTE FIYAT"]:
-            col_map[c] = "LİSTE FİYATI"
-
-    df = df.rename(columns=col_map)
-    required = ["MODEL", "AÇIKLAMA", "LİSTE FİYATI"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Fiyat listesinde kolon eksik: {missing}. Beklenen: {required}")
-
-    df = df[required].dropna(subset=["MODEL"]).copy()
-    df["MODEL"] = df["MODEL"].astype(str).str.strip()
-    df["AÇIKLAMA"] = df["AÇIKLAMA"].astype(str).str.strip()
-
-    def to_num(v):
-        if pd.isna(v):
-            return None
-        if isinstance(v, (int, float)):
-            return float(v)
-        s = str(v).strip().replace(" ", "")
-        if "," in s and "." in s:
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", ".")
-        try:
-            return float(s)
-        except Exception:
-            return None
-
-    df["LİSTE FİYATI"] = df["LİSTE FİYATI"].apply(to_num)
-    df = df.dropna(subset=["LİSTE FİYATI"])
-    df["LİSTE FİYATI"] = df["LİSTE FİYATI"].astype(float)
-    return df
-
-
 def calc_discounted(list_price: float, discount_pct: float) -> float:
     return list_price * (1.0 - (discount_pct / 100.0))
 
 
 def ensure_fonts_registered():
-    """
-    Repo'da bulunmalı:
-      fonts/DejaVuSans.ttf
-      fonts/DejaVuSans-Bold.ttf
-    """
     reg_path = os.path.join("fonts", "DejaVuSans.ttf")
     bold_path = os.path.join("fonts", "DejaVuSans-Bold.ttf")
 
     if not os.path.exists(reg_path) or not os.path.exists(bold_path):
         raise FileNotFoundError(
-            "Font dosyaları eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
+            "Font dosyalari eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
         )
 
     try:
@@ -132,11 +82,6 @@ def ensure_fonts_registered():
 # PDF Watermark (diagonal, full-page feel)
 # =========================================
 def _watermark(canvas, doc, text: str = "KODSAN"):
-    """
-    - Açı artırıldı (45°)
-    - Yazı sayfaya sığacak şekilde font otomatik ayarlanır
-    - Alpha çalışmazsa çok açık gri fallback
-    """
     w, h = A4
     canvas.saveState()
 
@@ -145,7 +90,7 @@ def _watermark(canvas, doc, text: str = "KODSAN"):
 
     alpha_ok = True
     try:
-        canvas.setFillAlpha(0.04)  # çok silik
+        canvas.setFillAlpha(0.04) 
     except Exception:
         alpha_ok = False
 
@@ -165,13 +110,11 @@ def _watermark(canvas, doc, text: str = "KODSAN"):
         font_size -= 2
 
     canvas.setFont(font_name, font_size)
-
     canvas.translate(w / 2.0, h / 2.0)
     canvas.rotate(angle)
 
     tw = canvas.stringWidth(text, font_name, font_size)
     canvas.drawString(-tw / 2.0, -font_size * 0.15, text)
-
     canvas.restoreState()
 
 
@@ -208,11 +151,10 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         leading=11,
     )
 
-    # Table cell styles (küçük font + satır kırma)
     cell_model = ParagraphStyle(
         "cell_model",
         parent=styles["Normal"],
-        fontName="DejaVuSans",
+        fontName="DejaVuSans-Bold",
         fontSize=7.4,
         leading=9,
     )
@@ -231,7 +173,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         fontName="DejaVuSans",
         fontSize=7.4,
         leading=9,
-        alignment=2,  # RIGHT
+        alignment=2, 
     )
 
     small = ParagraphStyle(
@@ -246,14 +188,13 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(Paragraph("KODSAN TEKLİF", title_style))
     story.append(Spacer(1, 3 * mm))
 
-    # Üst bilgiler (iskonto PDF'de yok)
     info_data = [
         ["Tarih", meta["tarih"]],
         ["Geçerlilik", meta["gecerlilik"]],
         ["Firma İsmi", meta["firma"]],
         ["Yetkili İsmi", meta["yetkili"]],
         ["Proje İsmi", meta["proje"]],
-        ["Teklifi Hazırlayan", meta["hazirlayan"]],
+        ["Teklifi Hazirlayan", meta["hazirlayan"]],
         ["E-mail", meta["email"]],
         ["Telefon", meta["telefon"]],
     ]
@@ -276,15 +217,17 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(info_tbl)
     story.append(Spacer(1, 5 * mm))
 
-    # Ürün tablosu
-    header = ["Model", "Açıklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
+    header = ["Model", "Açiklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
     rows = [header]
 
     for _, r in cart_df.iterrows():
+        # Yapistirilan metindeki satir atlamalarini (Enter) PDF formatina (br) cevirme
+        desc_html = str(r["AÇIKLAMA"]).replace("\n", "<br/>")
+        
         rows.append(
             [
                 Paragraph(str(r["MODEL"]), cell_model),
-                Paragraph(str(r["AÇIKLAMA"]), cell_desc),  # satır kırar
+                Paragraph(desc_html, cell_desc), 
                 Paragraph(str(int(r["ADET"])), cell_num),
                 Paragraph(eur_fmt_dec(float(r["BİRİM (EUR)"]), 2), cell_num),
                 Paragraph(eur_fmt_dec(float(r["TOPLAM (EUR)"]), 2), cell_num),
@@ -318,7 +261,6 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(Paragraph(f"<b>Toplam:</b> {eur_fmt_dec(total, 2)} EUR + KDV", normal))
     story.append(Spacer(1, 3 * mm))
 
-    # Notlar
     story.append(Paragraph("<b>NOTLAR</b>", normal))
     story.append(Spacer(1, 1.5 * mm))
     for n in NOTES:
@@ -374,16 +316,13 @@ def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> by
 # Streamlit UI
 # =========================================
 st.set_page_config(
-    page_title="Teklif Oluşturucu",
+    page_title="Teklif Oluşturucu (Manuel Giriş)",
     page_icon="📄",
     layout="wide"
 )
 
 if "cart" not in st.session_state:
     st.session_state.cart = []
-
-if "price_list" not in st.session_state:
-    st.session_state.price_list = None
 
 with st.sidebar:
     st.header("Teklif Bilgileri")
@@ -408,101 +347,51 @@ with st.sidebar:
     st.caption(f"Geçerlilik: {gecerlilik.strftime('%d.%m.%Y')} (5 gün)")
 
     st.divider()
-    st.subheader("Fiyat Listesi")
-
-    up = st.file_uploader("Excel/CSV yükle (MODEL, AÇIKLAMA, LİSTE FİYATI)", type=["xlsx", "xls", "csv"])
-    if up is not None:
-        try:
-            if up.name.lower().endswith(".csv"):
-                df_pl = pd.read_csv(up)
-            else:
-                df_pl = pd.read_excel(up)
-            df_pl = normalize_price_list(df_pl)
-            st.session_state.price_list = df_pl
-            st.success(f"Yüklendi: {len(df_pl)} ürün")
-        except Exception as e:
-            st.session_state.price_list = None
-            st.error(f"Fiyat listesi okunamadı: {e}")
-
-    if st.session_state.price_list is None and os.path.exists("price_list.csv"):
-        try:
-            df_pl = pd.read_csv("price_list.csv")
-            df_pl = normalize_price_list(df_pl)
-            st.session_state.price_list = df_pl
-            st.info("price_list.csv kullanılıyor.")
-        except Exception as e:
-            st.warning(f"price_list.csv okunamadı: {e}")
-
-    if st.session_state.price_list is None:
-        demo = pd.DataFrame(
-            [
-                {
-                    "MODEL": "KSH-0800-V5.1",
-                    "AÇIKLAMA": "SOLAR & ISI POMPASI BOYLER - ÇİFT SERPANTİNLİ 800 LİTRE - 10 BAR",
-                    "LİSTE FİYATI": 2215,
-                }
-            ]
-        )
-        st.session_state.price_list = demo
-        st.warning("Demo fiyat listesi aktif. Kendi listenizi yükleyin veya repo'ya price_list.csv ekleyin.")
-
-    st.divider()
-    if st.button("Sepeti sıfırla", use_container_width=True):
+    if st.button("Sepeti sifirla", use_container_width=True):
         st.session_state.cart = []
         st.rerun()
-
-pl = st.session_state.price_list.copy()
 
 colA, colB = st.columns([1.1, 1.2], gap="large")
 
 with colA:
-    st.subheader("Ürün Ekle")
+    st.subheader("Ürün Ekle (Manuel)")
 
-    q = st.text_input("Ürün arama (ör: KSH)", value="")
-    filtered = pl
-    if q.strip():
-        qs = q.strip().upper()
-        filtered = pl[
-            pl["MODEL"].str.upper().str.contains(qs, na=False)
-            | pl["AÇIKLAMA"].str.upper().str.contains(qs, na=False)
-        ].copy()
+    # Varsayilan gorsel metni sablonu
+    ornek_model = "KHE-P01-5-C10-CS-00 PLAKALI EŞANJÖR"
+    ornek_aciklama = "Kapasite : 100.000 kCal/h\nPrimer Devre : 90°C / 70°C - 50 kPa\nSekonder Devre : 10°C / 60°C - 50 kPa\nPlaka ve Conta Malzemesi : 316 Paslanmaz / 0,5 mm - EPDM\nGövde Malzemesi ve İşletme Basincci : Karbon Çelik - 10 Bar\nBağlanti Malzemesi ve Çapi : Karbon Çelik - 1\" Dişli"
 
-    filtered["LABEL"] = filtered.apply(
-        lambda r: f"{r['MODEL']} | {r['AÇIKLAMA']} | {eur_fmt_dec(r['LİSTE FİYATI'], 2)} EUR",
-        axis=1,
-    )
+    model_input = st.text_input("Ürün Kodu / Başlik", value=ornek_model)
+    aciklama_input = st.text_area("İçerik / Teknik Özellikler", value=ornek_aciklama, height=180)
 
-    if len(filtered) == 0:
-        st.info("Arama kriterine uygun ürün yok.")
-        selected = None
-    else:
-        selected_label = st.selectbox("Ürün seç", filtered["LABEL"].tolist())
-        selected = filtered[filtered["LABEL"] == selected_label].iloc[0].to_dict()
+    c1, c2 = st.columns(2)
+    with c1:
+        qty = st.number_input("Adet", min_value=1, value=1, step=1)
+    with c2:
+        list_price = st.number_input("Birim Liste Fiyati (EUR)", min_value=0.0, value=1000.0, step=10.0, format="%.2f")
 
-    qty = st.number_input("Adet", min_value=1, value=1, step=1)
+    unit = calc_discounted(list_price, float(iskonto))
 
-    if selected:
-        list_price = float(selected["LİSTE FİYATI"])
-        unit = calc_discounted(list_price, float(iskonto))
+    st.markdown("**Seçilen ürün özeti**")
+    st.write(f"**Liste fiyati:** {eur_fmt_dec(list_price, 2)} EUR")
+    st.write(f"**İskontolu birim fiyat:** {eur_fmt_dec(unit, 2)} EUR + KDV")
 
-        st.markdown("**Seçilen ürün özeti**")
-        st.write(f"**Model:** {selected['MODEL']}")
-        st.write(f"**Açıklama:** {selected['AÇIKLAMA']}")
-        st.write(f"**Liste fiyatı:** {eur_fmt_dec(list_price, 2)} EUR")
-        st.write(f"**İskontolu birim fiyat:** {eur_fmt_dec(unit, 2)} EUR + KDV")
-
-        if st.button("Sepete ekle", type="primary", use_container_width=True):
+    if st.button("Sepete ekle", type="primary", use_container_width=True):
+        if not model_input.strip() and not aciklama_input.strip():
+            st.error("Lütfen ürün kodu veya açiklama giriniz.")
+        else:
             found = False
             for r in st.session_state.cart:
-                if r["MODEL"] == selected["MODEL"]:
+                # Birebir ayni model adi ve aciklamasi varsa adedi guncelle
+                if r["MODEL"] == model_input and r["AÇIKLAMA"] == aciklama_input and r["LİSTE FİYATI"] == list_price:
                     r["ADET"] = int(r["ADET"]) + int(qty)
                     found = True
                     break
+            
             if not found:
                 st.session_state.cart.append(
                     {
-                        "MODEL": selected["MODEL"],
-                        "AÇIKLAMA": selected["AÇIKLAMA"],
+                        "MODEL": model_input,
+                        "AÇIKLAMA": aciklama_input,
                         "LİSTE FİYATI": list_price,
                         "ADET": int(qty),
                     }
@@ -510,10 +399,10 @@ with colA:
             st.rerun()
 
 with colB:
-    st.subheader("Sepet / Teklif Kalemleri")
+    st.subheader("Teklif Kalemleri")
 
     if len(st.session_state.cart) == 0:
-        st.info("Sepet boş. Soldan ürün ekleyin.")
+        st.info("Sepet boş. Soldan manuel ürün ekleyebilirsiniz.")
     else:
         cart_df = pd.DataFrame(st.session_state.cart)
         cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(lambda p: calc_discounted(float(p), float(iskonto)))
@@ -541,14 +430,14 @@ with colB:
         with c1:
             if st.button("Değişiklikleri uygula", use_container_width=True):
                 keep = []
-                for _, r in edited.iterrows():
+                for idx, r in edited.iterrows():
                     if bool(r.get("SİL", False)):
                         continue
                     keep.append(
                         {
                             "MODEL": r["MODEL"],
                             "AÇIKLAMA": r["AÇIKLAMA"],
-                            "LİSTE FİYATI": float(cart_df[cart_df["MODEL"] == r["MODEL"]]["LİSTE FİYATI"].iloc[0]),
+                            "LİSTE FİYATI": float(cart_df.loc[idx, "LİSTE FİYATI"]),
                             "ADET": int(r["ADET"]),
                         }
                     )
@@ -559,15 +448,6 @@ with colB:
             st.metric("Kümülatif Toplam", f"{eur_fmt_dec(total, 2)} EUR + KDV")
 
         st.divider()
-
-        st.markdown("**Satır formatı (müşteriye kopyala-yapıştır)**")
-        lines = []
-        for _, r in cart_df.iterrows():
-            unit_txt = eur_fmt_dec(float(r["BİRİM (EUR)"]), 2)
-            lines.append(
-                f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV"
-            )
-        st.code("\n".join(lines), language="text")
 
         meta = {
             "tarih": tarih.strftime("%d.%m.%Y"),
@@ -598,4 +478,4 @@ with colB:
             use_container_width=True,
         )
 
-st.caption("Fiyatlar EUR bazında; KDV hariç gösterilir. İskonto, liste fiyatına yüzde olarak uygulanır.")
+st.caption("Fiyatlar EUR bazinda; KDV hariç gösterilir. İskonto, liste fiyatina yüzde olarak uygulanir.")
